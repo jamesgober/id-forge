@@ -1,0 +1,51 @@
+[package]
+name = "id-forge"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+readme = "README.md"
+license = "Apache-2.0"
+
+authors = [
+    "James Gober <me@jamesgober.com>"
+]
+
+description = "Typed, high-performance unique ID generation for Rust. UUID v4/v7, ULID, Snowflake, NanoID, and custom epoch-based schemes in one zero-dependency library. Monotonic, distributed-safe, sortable variants."
+
+keywords = [
+    "uuid",
+    "ulid",
+    "snowflake",
+    "nanoid",
+    "id"
+]
+
+categories = [
+    "algorithms",
+    "data-structures",
+    "no-std"
+]
+
+documentation = "https://docs.rs/id-forge"
+repository = "https://github.com/jamesgober/id-forge"
+homepage = "https://github.com/jamesgober/id-forge"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+
+[dev-dependencies]
+
+[features]
+default = ["std", "uuid", "ulid", "snowflake", "nanoid"]
+std = []
+uuid = ["std"]
+ulid = ["std"]
+snowflake = ["std"]
+nanoid = ["std"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
