@@ -24,9 +24,9 @@
 //! or API keys.
 
 use core::fmt;
-use std::cell::RefCell;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::rng;
 
 /// A 128-bit UUID.
 ///
@@ -84,7 +84,7 @@ impl Uuid {
     /// assert_eq!(id.version(), 4);
     /// ```
     pub fn v4() -> Self {
-        let mut bytes = random_bytes_16();
+        let mut bytes = rng::next_bytes_16();
         bytes[6] = (bytes[6] & 0x0f) | 0x40;
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
         Self(bytes)
@@ -110,7 +110,7 @@ impl Uuid {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let mut bytes = random_bytes_16();
+        let mut bytes = rng::next_bytes_16();
         let ms_bytes = ms.to_be_bytes();
         bytes[0..6].copy_from_slice(&ms_bytes[2..8]);
         bytes[6] = (bytes[6] & 0x0f) | 0x70;
@@ -251,73 +251,6 @@ const fn hex_value(c: u8) -> Option<u8> {
     }
 }
 
-// -------- Inline xoshiro256** --------
-
-thread_local! {
-    static RNG: RefCell<Xoshiro256SS> = RefCell::new(Xoshiro256SS::from_entropy());
-}
-
-fn random_bytes_16() -> [u8; 16] {
-    RNG.with(|cell| {
-        let mut r = cell.borrow_mut();
-        let a = r.next_u64();
-        let b = r.next_u64();
-        let mut out = [0u8; 16];
-        out[0..8].copy_from_slice(&a.to_be_bytes());
-        out[8..16].copy_from_slice(&b.to_be_bytes());
-        out
-    })
-}
-
-struct Xoshiro256SS {
-    s: [u64; 4],
-}
-
-impl Xoshiro256SS {
-    fn from_entropy() -> Self {
-        static SEED_COUNTER: AtomicU64 = AtomicU64::new(0);
-        let pid = std::process::id() as u64;
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let counter = SEED_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let seed = pid
-            .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-            .wrapping_add(nanos)
-            .wrapping_add(counter.wrapping_mul(0xBF58_476D_1CE4_E5B9));
-        Self::from_seed(seed)
-    }
-
-    fn from_seed(mut seed: u64) -> Self {
-        let mut s = [0u64; 4];
-        for slot in &mut s {
-            seed = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = seed;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            *slot = z ^ (z >> 31);
-        }
-        if s == [0; 4] {
-            s[0] = 1;
-        }
-        Self { s }
-    }
-
-    #[inline]
-    fn next_u64(&mut self) -> u64 {
-        let result = self.s[1].wrapping_mul(5).rotate_left(7).wrapping_mul(9);
-        let t = self.s[1] << 17;
-        self.s[2] ^= self.s[0];
-        self.s[3] ^= self.s[1];
-        self.s[1] ^= self.s[2];
-        self.s[0] ^= self.s[3];
-        self.s[2] ^= t;
-        self.s[3] = self.s[3].rotate_left(45);
-        result
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,15 +384,6 @@ mod tests {
     fn from_str_works() {
         let id: Uuid = "f47ac10b-58cc-4372-a567-0e02b2c3d479".parse().unwrap();
         assert_eq!(id.to_string(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
-    }
-
-    #[test]
-    fn xoshiro_seeded_is_nonzero_state() {
-        let mut r = Xoshiro256SS::from_seed(0);
-        let a = r.next_u64();
-        let b = r.next_u64();
-        assert_ne!(a, 0);
-        assert_ne!(a, b);
     }
 
     #[test]

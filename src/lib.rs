@@ -26,14 +26,19 @@
 //!
 //! ## Status
 //!
-//! `v0.9.0` ships the real UUID v4 and v7 implementations per RFC 9562
-//! with an inline xoshiro256\*\* random source. ULID, Snowflake, and
-//! NanoID remain placeholders until `0.9.1`, `0.9.2`, and `0.9.3`.
+//! `v0.9.1` ships the real ULID implementation: spec-compliant
+//! Crockford base32, 80-bit monotonic factory inside a millisecond,
+//! and a case-insensitive parser. UUID v4/v7 (from `0.9.0`) and ULID
+//! now share an inline xoshiro256\*\* random source. Snowflake and
+//! NanoID remain placeholders until `0.9.2` and `0.9.3`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
+
+#[cfg(any(feature = "uuid", feature = "ulid", feature = "nanoid"))]
+mod rng;
 
 #[cfg(feature = "uuid")]
 pub mod uuid;

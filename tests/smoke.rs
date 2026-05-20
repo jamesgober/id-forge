@@ -31,6 +31,19 @@ fn smoke_ulid_unique() {
 }
 
 #[test]
+fn smoke_ulid_monotonic() {
+    let a = Ulid::new();
+    let b = Ulid::new();
+    assert!(b > a);
+}
+
+#[test]
+fn smoke_ulid_roundtrip() {
+    let id = Ulid::new();
+    assert_eq!(Ulid::parse_str(&id.to_string()).unwrap(), id);
+}
+
+#[test]
 fn smoke_snowflake_unique() {
     let gen = Snowflake::new(1);
     assert_ne!(gen.next_id(), gen.next_id());
