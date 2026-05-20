@@ -121,11 +121,28 @@ impl Snowflake {
     }
 
     /// The worker ID this generator was built with, clamped to 10 bits.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::snowflake::Snowflake;
+    ///
+    /// assert_eq!(Snowflake::new(42).worker_id(), 42);
+    /// assert_eq!(Snowflake::new(0xffff).worker_id(), 0x3ff);  // clamped
+    /// ```
     pub const fn worker_id(&self) -> u16 {
         self.worker_id
     }
 
     /// The epoch this generator subtracts from the wall clock.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::snowflake::{Snowflake, DEFAULT_EPOCH_MS};
+    ///
+    /// assert_eq!(Snowflake::new(1).epoch_ms(), DEFAULT_EPOCH_MS);
+    /// ```
     pub const fn epoch_ms(&self) -> u64 {
         self.epoch_ms
     }

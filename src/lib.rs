@@ -24,14 +24,13 @@
 //! own quirks, MSRV, and dependencies. `id-forge` is one zero-dep
 //! crate at MSRV 1.75 covering every scheme.
 //!
-//! ## Status
+//! ## Stability
 //!
-//! `v0.9.3` closes the 0.9.x algorithm cycle: NanoID now uses the
-//! shared xoshiro256\*\* generator with bias-free power-of-two
-//! rejection sampling and grows a `try_custom` strict entry point
-//! plus an `AlphabetError` type. UUID v4/v7 (`0.9.0`), ULID (`0.9.1`),
-//! and Snowflake (`0.9.2`) are unchanged. The next release is the
-//! 1.0.0 API freeze.
+//! `v1.0.0` is the API freeze. Every public item visible from this
+//! crate is committed under strict SemVer per
+//! [`docs/STABILITY.md`](https://github.com/jamesgober/id-forge/blob/main/docs/STABILITY.md).
+//! Within the `1.x` line, additive changes are minor releases; any
+//! breaking change requires a `2.0`. MSRV is Rust 1.75.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]

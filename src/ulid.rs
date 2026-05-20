@@ -133,6 +133,14 @@ impl Ulid {
     }
 
     /// Return the raw 16-byte big-endian representation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::ulid::Ulid;
+    ///
+    /// assert_eq!(Ulid::nil().as_bytes(), &[0u8; 16]);
+    /// ```
     pub const fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }

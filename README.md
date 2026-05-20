@@ -59,9 +59,9 @@ let id = nanoid::with_length(8);         // shorter NanoID
 
 ```toml
 [dependencies]
-id-forge = "0.9.3"                                          # all schemes (default)
-id-forge = { version = "0.9.3", default-features = false } # nothing (compile errors if you use anything)
-id-forge = { version = "0.9.3", default-features = false, features = ["uuid"] }  # just UUIDs
+id-forge = "1"                                          # all schemes (default)
+id-forge = { version = "1", default-features = false } # nothing (compile errors if you use anything)
+id-forge = { version = "1", default-features = false, features = ["uuid"] }  # just UUIDs
 ```
 
 ## Minimum supported Rust version

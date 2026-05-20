@@ -138,6 +138,15 @@ impl Uuid {
     }
 
     /// Return the raw 16-byte big-endian representation.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::uuid::Uuid;
+    ///
+    /// let id = Uuid::nil();
+    /// assert_eq!(id.as_bytes(), &[0u8; 16]);
+    /// ```
     pub const fn as_bytes(&self) -> &[u8; 16] {
         &self.0
     }
@@ -145,6 +154,16 @@ impl Uuid {
     /// Return the version nibble (the high 4 bits of byte 6).
     ///
     /// `4` for v4, `7` for v7, `0` for [`Uuid::nil`], `15` for [`Uuid::max`].
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::uuid::Uuid;
+    ///
+    /// assert_eq!(Uuid::v4().version(), 4);
+    /// assert_eq!(Uuid::v7().version(), 7);
+    /// assert_eq!(Uuid::nil().version(), 0);
+    /// ```
     pub const fn version(&self) -> u8 {
         self.0[6] >> 4
     }

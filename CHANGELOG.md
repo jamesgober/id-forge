@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-20
+
+### Stable API
+
+The `0.9.x` cycle delivered every algorithm; `1.0.0` is the
+**stability commitment**. Every public item is now committed
+under strict SemVer per [`docs/STABILITY.md`](docs/STABILITY.md).
+Consumers can pin `id-forge = "1"` and expect minor / patch
+updates within `1.x` to remain backwards-compatible.
+
+### Added
+
+- `docs/STABILITY.md` enumerating the frozen public surface, the
+  behavioural contracts, and the items that are explicitly NOT
+  part of the SemVer promise (internal PRNG choice, error `Display`
+  text, transitive deps).
+- Rustdoc examples on `Uuid::as_bytes`, `Uuid::version`,
+  `Ulid::as_bytes`, `Snowflake::worker_id`, and `Snowflake::epoch_ms`.
+  Every public function and type now has an example per the
+  pre-`1.0` directive.
+
+### Changed
+
+- No source change to algorithm behaviour. Bytes a `Uuid::v4()`
+  emits are identical to `0.9.3`.
+
+### Frozen surface — summary
+
+* **uuid**: `Uuid` + `nil/max/v4/v7/from_bytes/as_bytes/version/parse_str`
+  + `ParseError`. Implements `Debug, Clone, Copy, PartialEq, Eq,
+  Hash, PartialOrd, Ord, Default, Display, FromStr`.
+* **ulid**: `Ulid` + `nil/max/new/from_bytes/as_bytes/timestamp_ms/parse_str`
+  + `ParseError`. Implements `Debug, Clone, Copy, PartialEq, Eq,
+  Hash, PartialOrd, Ord, Default, Display, FromStr`.
+* **snowflake**: `Snowflake` + `new/with_epoch/worker_id/epoch_ms/try_next_id/next_id/parts`
+  + `ClockSkew` + constants `DEFAULT_EPOCH_MS`, `SEQUENCE_BITS`,
+  `WORKER_BITS`, `TIMESTAMP_BITS`.
+* **nanoid**: `generate/with_length/custom/try_custom/validate_alphabet`
+  + `AlphabetError` + constants `DEFAULT_ALPHABET`, `DEFAULT_LENGTH`.
+
+### MSRV
+
+Rust **1.75**, frozen at `1.0.0`. Within `1.x`, MSRV bumps are
+advertised but not treated as breaking.
+
+### Verification
+
+Run on Windows x86_64, rustc 1.95; the full CI matrix
+(ubuntu-latest, macos-latest, windows-latest) passes the same
+gate:
+
+```
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features    -- -D warnings
+cargo clippy --all-targets --no-default-features -- -D warnings
+cargo build  --verbose
+cargo build  --all-features --verbose
+cargo build  --no-default-features --verbose
+cargo test   --verbose
+cargo test   --all-features --verbose
+RUSTDOCFLAGS="-D warnings" cargo doc --all-features --no-deps
+cargo +1.75 build --all-features --verbose
+```
+
+Test coverage at this release:
+
+* 73 unit tests across `rng`, `uuid`, `ulid`, `snowflake`, `nanoid`.
+* 16 smoke tests covering every public constructor.
+* 35 doctests on the public API examples (every public function /
+  type now has at least one).
+
 ## [0.9.3] - 2026-05-20
 
 ### Added
@@ -226,7 +297,8 @@ This is the name-claim release. Real implementations follow RFC 9562
 for UUIDs, the ULID spec, and the Twitter Snowflake design. Production
 randomness lands in `0.9.x`.
 
-[Unreleased]: https://github.com/jamesgober/id-forge/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/jamesgober/id-forge/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/jamesgober/id-forge/releases/tag/v1.0.0
 [0.9.3]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.3
 [0.9.2]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.1
