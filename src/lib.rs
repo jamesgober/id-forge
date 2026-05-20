@@ -26,8 +26,9 @@
 //!
 //! ## Status
 //!
-//! `v0.1.0` is the name-claim release with placeholder implementations.
-//! The real algorithms land in `0.9.x`.
+//! `v0.9.0` ships the real UUID v4 and v7 implementations per RFC 9562
+//! with an inline xoshiro256\*\* random source. ULID, Snowflake, and
+//! NanoID remain placeholders until `0.9.1`, `0.9.2`, and `0.9.3`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
