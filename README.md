@@ -1,4 +1,6 @@
 <h1 align="center">
+    <img width="99" alt="Rust logo" src="https://raw.githubusercontent.com/jamesgober/rust-collection/72baabd71f00e14aa9184efcb16fa3deddda3a0a/assets/rust-logo.svg">
+    <br>
     <strong>id-forge</strong>
     <br>
     <sup><sub>UNIQUE ID GENERATION FOR RUST</sub></sup>
@@ -8,6 +10,7 @@
     <a href="https://crates.io/crates/id-forge"><img alt="crates.io" src="https://img.shields.io/crates/v/id-forge.svg"></a>
     <a href="https://crates.io/crates/id-forge"><img alt="downloads" src="https://img.shields.io/crates/d/id-forge.svg"></a>
     <a href="https://docs.rs/id-forge"><img alt="docs.rs" src="https://docs.rs/id-forge/badge.svg"></a>
+    <a href="https://github.com/rust-lang/rfcs/blob/master/text/2495-min-rust-version.md" title="MSRV"><img alt="MSRV" src="https://img.shields.io/badge/MSRV-1.75%2B-blue"></a>
     <a href="https://github.com/jamesgober/id-forge/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/jamesgober/id-forge/actions/workflows/ci.yml/badge.svg"></a>
 </p>
 
@@ -61,17 +64,30 @@ id-forge = { version = "0.1", default-features = false } # nothing (compile erro
 id-forge = { version = "0.1", default-features = false, features = ["uuid"] }  # just UUIDs
 ```
 
-## Status
-
-`v0.1.0` is the name-claim release with placeholder implementations
-of every scheme. The real algorithms (RFC 9562 UUIDs, full
-Crockford-base32 ULIDs, RFC-compliant Snowflake sequence rollover,
-NIST-quality NanoID randomness) land in `0.9.x`.
-
 ## Minimum supported Rust version
 
 `1.75` — pinned in `Cargo.toml` and verified by CI.
 
+
+<br>
+
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT License ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+
+
+<!-- FOOT COPYRIGHT
+################################################# -->
+<div align="center">
+  <h2></h2>
+  <sup>COPYRIGHT <small>&copy;</small> 2026 <strong>JAMES GOBER.</strong></sup>
+</div>
