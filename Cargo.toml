@@ -38,6 +38,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]
 
+[[example]]
+name = "basic"
+required-features = ["uuid", "ulid", "snowflake", "nanoid"]
+
+[[test]]
+name = "smoke"
+required-features = ["uuid", "ulid", "snowflake", "nanoid"]
+
 [features]
 default = ["std", "uuid", "ulid", "snowflake", "nanoid"]
 std = []

@@ -50,6 +50,14 @@ The randomness is fast non-cryptographic. For session tokens or API
 keys, compose with a CSPRNG for the random portion — `id-forge` itself
 intentionally has no `getrandom` dependency.
 
+### CI
+
+- `Cargo.toml` declares `required-features` on the `basic` example and
+  the `smoke` integration test (all four scheme features). This makes
+  `cargo clippy --all-targets --no-default-features` pass: Cargo
+  simply skips the targets whose feature set is not active, instead of
+  trying to compile them against missing modules.
+
 ## [0.1.0] - 2026-05-11
 
 ### Added
