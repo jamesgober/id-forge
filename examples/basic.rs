@@ -16,7 +16,12 @@ fn main() {
     println!("ULID b:     {b} (monotonic: {})", b > a);
 
     let gen = Snowflake::new(1);
-    println!("Snowflake:  {}", gen.next_id());
+    let sf = gen.next_id();
+    let (ts_offset, worker, seq) = Snowflake::parts(sf);
+    println!(
+        "Snowflake:  {sf}  (ts+epoch={}, worker={worker}, seq={seq})",
+        ts_offset + gen.epoch_ms()
+    );
 
     println!("NanoID 21:  {}", nanoid::generate());
     println!("NanoID 8:   {}", nanoid::with_length(8));

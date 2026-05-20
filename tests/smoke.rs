@@ -53,8 +53,26 @@ fn smoke_snowflake_unique() {
 fn smoke_snowflake_worker_extracts() {
     let gen = Snowflake::new(42);
     let id = gen.next_id();
-    let worker = (id >> 12) & 0x3ff;
+    let (_, worker, _) = Snowflake::parts(id);
     assert_eq!(worker, 42);
+}
+
+#[test]
+fn smoke_snowflake_try_next_id_ok() {
+    let gen = Snowflake::new(1);
+    let id = gen.try_next_id().expect("clock should advance");
+    assert!(id > 0);
+}
+
+#[test]
+fn smoke_snowflake_monotonic_burst() {
+    let gen = Snowflake::new(1);
+    let mut prev = gen.next_id();
+    for _ in 0..5_000 {
+        let cur = gen.next_id();
+        assert!(cur > prev);
+        prev = cur;
+    }
 }
 
 #[test]

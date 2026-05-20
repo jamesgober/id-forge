@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-05-20
+
+### Added
+
+- `Snowflake::try_next_id() -> Result<u64, ClockSkew>` — explicit
+  clock-skew handling. Returns `Err` when the wall clock has moved
+  backward since the most recent ID; the existing `next_id()` keeps
+  its `-> u64` signature and panics on the same condition (panic
+  message names the millisecond offsets involved).
+- `Snowflake::parts(id) -> (timestamp_offset_ms, worker_id, sequence)`
+  — `const fn` decomposition for any Snowflake-layout ID, no matter
+  which generator produced it. The timestamp is the offset from the
+  generator's epoch; callers add `Snowflake::epoch_ms()` to get the
+  wall-clock millisecond.
+- `Snowflake::worker_id()` and `Snowflake::epoch_ms()` accessors.
+- `ClockSkew` error type carrying `last_ms` and `now_ms` (offsets
+  from the generator's epoch), implementing `Display` and
+  `std::error::Error`.
+- Public constants `SEQUENCE_BITS`, `WORKER_BITS`, `TIMESTAMP_BITS`
+  so callers can spell the layout instead of hard-coding `12`, `10`,
+  `41` in their own decoders.
+
+### Changed
+
+- `Snowflake::next_id` is no longer a per-call counter+time
+  approximation. It runs a lock-free CAS loop over a packed
+  `(last_ms, next_seq)` atomic word: monotonic within a worker, no
+  duplicate IDs even under heavy multi-thread contention, sequence
+  resets to 0 at each new millisecond.
+- Sequence exhaustion (4096 IDs in a single millisecond) now blocks
+  the calling thread in a microsleep loop until the wall clock
+  advances, instead of issuing duplicate sequence numbers. Wait is
+  bounded by one millisecond minus elapsed time in the current ms.
+- `Snowflake::new` and `Snowflake::with_epoch` are now `const fn`.
+
+### Tests
+
+- 10 000-ID monotonic burst on a single generator.
+- 50 000-ID uniqueness sweep.
+- 8 threads × 2 000 IDs = 16 000 IDs under contention, all unique.
+- Forced clock-skew scenario via direct state manipulation:
+  `try_next_id` returns `Err(ClockSkew)`, `next_id` panics.
+- Sequence-exhaustion scenario: pre-load the state to mark a
+  millisecond exhausted and confirm the next call blocks until the
+  next millisecond and starts the new ms at sequence 0.
+- `parts` round-trip and per-field extraction against a hand-built
+  ID.
+
 ## [0.9.1] - 2026-05-20
 
 ### Added
@@ -128,7 +176,8 @@ This is the name-claim release. Real implementations follow RFC 9562
 for UUIDs, the ULID spec, and the Twitter Snowflake design. Production
 randomness lands in `0.9.x`.
 
-[Unreleased]: https://github.com/jamesgober/id-forge/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/jamesgober/id-forge/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.0
 [0.1.0]: https://github.com/jamesgober/id-forge/releases/tag/v0.1.0

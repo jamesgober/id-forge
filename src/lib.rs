@@ -26,11 +26,11 @@
 //!
 //! ## Status
 //!
-//! `v0.9.1` ships the real ULID implementation: spec-compliant
-//! Crockford base32, 80-bit monotonic factory inside a millisecond,
-//! and a case-insensitive parser. UUID v4/v7 (from `0.9.0`) and ULID
-//! now share an inline xoshiro256\*\* random source. Snowflake and
-//! NanoID remain placeholders until `0.9.2` and `0.9.3`.
+//! `v0.9.2` ships the real Snowflake implementation: lock-free CAS
+//! state machine with per-millisecond sequence rollover, microsleep
+//! waiting on exhaustion, clock-skew detection via `Result`, and
+//! `parts()` decomposition. UUID v4/v7 (`0.9.0`) and ULID (`0.9.1`)
+//! are unchanged. NanoID remains a placeholder until `0.9.3`.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
