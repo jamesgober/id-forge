@@ -23,10 +23,25 @@ updates within `1.x` to remain backwards-compatible.
   behavioural contracts, and the items that are explicitly NOT
   part of the SemVer promise (internal PRNG choice, error `Display`
   text, transitive deps).
+- `docs/API.md` — full API reference mirroring the `metrics-lib`
+  format: example-pointers index, table of contents, installation
+  + feature-flag matrix, an error-handling and panic-guarantees
+  table, a section per public type (constructors, accessors,
+  parsing, behavioural contract, multiple per-method examples),
+  five real-world walkthroughs (time-ordered DB primary keys, URL
+  shortener, distributed worker IDs, clock-skew recovery,
+  migration from the `uuid` / `ulid` crates), and a performance
+  summary.
 - Rustdoc examples on `Uuid::as_bytes`, `Uuid::version`,
   `Ulid::as_bytes`, `Snowflake::worker_id`, and `Snowflake::epoch_ms`.
   Every public function and type now has an example per the
   pre-`1.0` directive.
+- Seven new per-scheme examples in `examples/`:
+  `uuid_v4`, `uuid_v7`, `ulid_monotonic`,
+  `snowflake_distributed`, `snowflake_clock_skew`,
+  `nanoid_short_url`, `nanoid_validate`. Each declares its
+  `required-features` in `Cargo.toml` so `--no-default-features`
+  CI runs skip them cleanly.
 
 ### Changed
 

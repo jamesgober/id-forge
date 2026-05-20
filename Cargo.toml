@@ -46,6 +46,34 @@ required-features = ["uuid", "ulid", "snowflake", "nanoid"]
 name = "bench"
 required-features = ["uuid", "ulid", "snowflake", "nanoid"]
 
+[[example]]
+name = "uuid_v4"
+required-features = ["uuid"]
+
+[[example]]
+name = "uuid_v7"
+required-features = ["uuid"]
+
+[[example]]
+name = "ulid_monotonic"
+required-features = ["ulid"]
+
+[[example]]
+name = "snowflake_distributed"
+required-features = ["snowflake"]
+
+[[example]]
+name = "snowflake_clock_skew"
+required-features = ["snowflake"]
+
+[[example]]
+name = "nanoid_short_url"
+required-features = ["nanoid"]
+
+[[example]]
+name = "nanoid_validate"
+required-features = ["nanoid"]
+
 [[test]]
 name = "smoke"
 required-features = ["uuid", "ulid", "snowflake", "nanoid"]

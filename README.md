@@ -19,8 +19,6 @@
     Monotonic, distributed-safe, sortable variants.
 </p>
 
----
-
 ## What it does
 
 Every project needs unique identifiers. Today's options force you to
