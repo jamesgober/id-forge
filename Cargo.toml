@@ -1,6 +1,6 @@
 [package]
 name = "id-forge"
-version = "0.9.2"
+version = "0.9.3"
 edition = "2021"
 rust-version = "1.75"
 readme = "README.md"
@@ -40,6 +40,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [[example]]
 name = "basic"
+required-features = ["uuid", "ulid", "snowflake", "nanoid"]
+
+[[example]]
+name = "bench"
 required-features = ["uuid", "ulid", "snowflake", "nanoid"]
 
 [[test]]

@@ -92,3 +92,15 @@ fn smoke_nanoid_custom_alphabet() {
     let id = nanoid::custom(16, b"01");
     assert!(id.chars().all(|c| c == '0' || c == '1'));
 }
+
+#[test]
+fn smoke_nanoid_try_custom_ok() {
+    let id = nanoid::try_custom(12, b"0123456789").unwrap();
+    assert_eq!(id.len(), 12);
+    assert!(id.chars().all(|c| c.is_ascii_digit()));
+}
+
+#[test]
+fn smoke_nanoid_try_custom_rejects_duplicate() {
+    assert!(nanoid::try_custom(8, b"aabb").is_err());
+}

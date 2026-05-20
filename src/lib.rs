@@ -26,11 +26,12 @@
 //!
 //! ## Status
 //!
-//! `v0.9.2` ships the real Snowflake implementation: lock-free CAS
-//! state machine with per-millisecond sequence rollover, microsleep
-//! waiting on exhaustion, clock-skew detection via `Result`, and
-//! `parts()` decomposition. UUID v4/v7 (`0.9.0`) and ULID (`0.9.1`)
-//! are unchanged. NanoID remains a placeholder until `0.9.3`.
+//! `v0.9.3` closes the 0.9.x algorithm cycle: NanoID now uses the
+//! shared xoshiro256\*\* generator with bias-free power-of-two
+//! rejection sampling and grows a `try_custom` strict entry point
+//! plus an `AlphabetError` type. UUID v4/v7 (`0.9.0`), ULID (`0.9.1`),
+//! and Snowflake (`0.9.2`) are unchanged. The next release is the
+//! 1.0.0 API freeze.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]

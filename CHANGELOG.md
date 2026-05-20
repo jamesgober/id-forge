@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-05-20
+
+### Added
+
+- `nanoid::try_custom(length, alphabet) -> Result<String, AlphabetError>`
+  — strict counterpart to `custom`. Validates the alphabet (non-empty,
+  no duplicate bytes) before generating.
+- `nanoid::validate_alphabet(&[u8]) -> Result<(), AlphabetError>` so
+  callers can vet a configuration alphabet once at startup.
+- `nanoid::AlphabetError` enum (`Empty`, `Duplicate(u8)`) implementing
+  `Display` and `std::error::Error`.
+- `examples/bench.rs` — dep-free single-thread throughput harness for
+  all four schemes. Run with `cargo run --release --example bench`.
+  Uses `std::time::Instant`; no Criterion, no external dependency.
+
+### Changed
+
+- `nanoid::custom`, `with_length`, and `generate` now draw from the
+  shared `crate::rng` xoshiro256\*\* generator instead of the 0.1.0
+  LCG placeholder.
+- Character selection switched from `byte % alphabet.len()` to a
+  bitstream with a smallest-power-of-two mask and rejection sampling.
+  Result: every character in any non-power-of-two alphabet has the
+  same probability of being chosen. The 0.1.0 placeholder was
+  measurably biased on a 17-character alphabet; the new
+  implementation passes a ±12 % uniformity band on 170 000 samples.
+- A length of `0` now short-circuits to the empty string instead of
+  entering the generation loop.
+- A single-character alphabet is treated specially (every output
+  character is that single byte) instead of falling into a no-op
+  loop.
+
+### Tests
+
+- 10 000-ID uniqueness sweep on the default 21-character alphabet.
+- Bias check: 170 000 characters drawn over a 17-char alphabet, each
+  position's frequency stays within ±12 % of the uniform expectation.
+- `try_custom` rejects empty alphabets and the first duplicate byte
+  encountered.
+- `validate_alphabet` exposed as a public helper with its own tests.
+- `mask_bits` lookup table verified for 2, 8, 64, 65, 256.
+- Length round-trip across alphabet sizes {2, 7, 16, 33, 64, 65, 128, 200}.
+
+### Notes
+
+`nanoid::custom` remains permissive: empty alphabet returns `""`,
+duplicate bytes are tolerated (and bias the distribution toward the
+repeated bytes — by design, since this is the unchecked entry point).
+Callers who want validation use `try_custom`.
+
 ## [0.9.2] - 2026-05-20
 
 ### Added
@@ -176,7 +226,8 @@ This is the name-claim release. Real implementations follow RFC 9562
 for UUIDs, the ULID spec, and the Twitter Snowflake design. Production
 randomness lands in `0.9.x`.
 
-[Unreleased]: https://github.com/jamesgober/id-forge/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/jamesgober/id-forge/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.3
 [0.9.2]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.2
 [0.9.1]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.1
 [0.9.0]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.0
