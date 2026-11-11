@@ -97,9 +97,8 @@ These are part of the freeze. Future releases will not regress
 them:
 
 * **`Uuid::v4` produces RFC 9562 §5.4 random UUIDs.** Version
-  nibble = `0100`, variant bits = `10`. The 122 random bits come
-  from a non-cryptographic generator; callers needing CSPRNG output
-  must compose their own.
+  nibble = `0100`, variant bits = `10`. Since `1.1.0` the 122
+  random bits come from the operating system's random source.
 * **`Uuid::v7` produces RFC 9562 §5.7 time-ordered UUIDs.** 48-bit
   big-endian millisecond prefix; version nibble = `0111`; variant
   bits = `10`. Two v7 UUIDs minted in different milliseconds
@@ -122,16 +121,21 @@ them:
 
 ## What is NOT promised
 
-* The exact internal PRNG (currently xoshiro256\*\*) — a future
-  patch release may switch to a faster generator if it improves
-  throughput without weakening the bias / uniqueness guarantees.
+* How the OS random source is read (currently `mod-rand`'s
+  `tier3`, buffered per thread). Since `1.1.0`, random bits for
+  UUID v4/v7, ULID and NanoID always come from the OS random
+  source; a future release will not move them back to a seeded
+  generator.
 * Error `Display` strings — the format may change between minor
   releases for clarity.
 * Internal performance characteristics beyond the targets in
   `REPS.md §5`. The `examples/bench.rs` numbers are
   informational, not contractual.
-* The transitive dependency tree — `id-forge` itself has no runtime
-  dependencies outside `std`, and that is contractual. Anything
+* The transitive dependency tree, with one contractual limit:
+  `id-forge` has no third-party runtime dependencies. Its only
+  runtime dependency is the first-party `mod-rand` (since `1.1.0`,
+  for the OS random source), which itself depends on nothing
+  outside `std`. Anything
   Cargo adds for tooling (`dev-dependencies`, build deps) can
   change.
 * `#[doc(hidden)]` items and any `#[cfg(test)]` modules. These are

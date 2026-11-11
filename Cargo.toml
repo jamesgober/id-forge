@@ -1,6 +1,6 @@
 [package]
 name = "id-forge"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.75"
 readme = "README.md"
@@ -10,7 +10,7 @@ authors = [
     "James Gober <me@jamesgober.com>"
 ]
 
-description = "Typed, high-performance unique ID generation for Rust. UUID v4/v7, ULID, Snowflake, NanoID, and custom epoch-based schemes in one zero-dependency library. Monotonic, distributed-safe, sortable variants."
+description = "Typed, high-performance unique ID generation for Rust. UUID v4/v7, ULID, Snowflake, NanoID, and custom epoch-based schemes in one library. Random IDs come from the OS random source. No third-party dependencies. Monotonic, distributed-safe, sortable variants."
 
 keywords = [
     "uuid",
@@ -35,6 +35,9 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
+# OS random source (`tier3`) for UUID v4/v7, ULID and NanoID. A
+# first-party crate with no dependencies of its own.
+mod-rand = { version = "1.0", optional = true, default-features = false, features = ["tier3"] }
 
 [dev-dependencies]
 
@@ -81,10 +84,10 @@ required-features = ["uuid", "ulid", "snowflake", "nanoid"]
 [features]
 default = ["std", "uuid", "ulid", "snowflake", "nanoid"]
 std = []
-uuid = ["std"]
-ulid = ["std"]
+uuid = ["std", "dep:mod-rand"]
+ulid = ["std", "dep:mod-rand"]
 snowflake = ["std"]
-nanoid = ["std"]
+nanoid = ["std", "dep:mod-rand"]
 
 [profile.release]
 opt-level = 3

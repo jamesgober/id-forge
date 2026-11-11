@@ -81,7 +81,7 @@ id-forge = { version = "1", default-features = false, features = ["snowflake"] }
 id-forge = { version = "1", default-features = false, features = ["nanoid"] }
 ```
 
-MSRV: Rust **1.75**. Zero runtime dependencies outside `std`.
+MSRV: Rust **1.75**. No third-party runtime dependencies; random IDs use the first-party `mod-rand` for the OS random source.
 
 ## Quick Start
 
@@ -131,8 +131,11 @@ The feature set is part of the public API per `docs/STABILITY.md`. New flags are
 | `Snowflake::next_id`                | **Panic** on backward clock        | Catch with `try_next_id` instead.     |
 | `nanoid::try_custom`                | `Err(AlphabetError)`               | Pre-validate alphabet at startup.     |
 | `nanoid::custom`                    | Silent (empty/dup-tolerant)        | Use `try_custom` if rejection wanted. |
+| `Uuid::v4`, `Uuid::v7`, `Ulid::new`, every `nanoid` generator | **Panic** if the OS random source fails | None needed on supported platforms: the source blocks rather than fail. Seen only in sandboxes that forbid it. |
 
 `id-forge` **never** issues an ID that could collide with one previously issued by the same generator. When the wall clock cannot guarantee that, `try_next_id` returns `Err` and `next_id` panics — neither falls back to a possibly-duplicate value.
+
+Random IDs never fall back to a seeded or weaker generator: if the OS random source cannot be read, generation panics instead.
 
 ---
 
