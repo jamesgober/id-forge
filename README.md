@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-    UUID v4/v7, ULID, Snowflake, NanoID — every common scheme in one zero-dependency library.<br>
+    UUID v4/v7, ULID, Snowflake, NanoID: every common scheme in one library, with no third-party dependencies.<br>
     Monotonic, distributed-safe, sortable variants.
 </p>
 
@@ -26,8 +26,11 @@ mix and match crates: `uuid` for UUIDs, `ulid` for ULIDs,
 `snowflake-rs` for Snowflakes, `nanoid` for NanoIDs. Each has its
 own conventions, MSRV, and dependency tree.
 
-`id-forge` puts every common ID scheme in one crate with zero
-runtime dependencies and MSRV 1.75.
+`id-forge` puts every common ID scheme in one crate at MSRV 1.75,
+with no third-party runtime dependencies. Random IDs (UUID v4/v7,
+ULID, NanoID) come from the OS random source through the
+first-party `mod-rand`, which itself depends on nothing outside
+`std`.
 
 ## Quick start
 

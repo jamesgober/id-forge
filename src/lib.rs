@@ -1,7 +1,7 @@
 //! # id-forge
 //!
 //! Typed, high-performance unique ID generation for Rust. Every common
-//! ID scheme in one zero-dependency library:
+//! ID scheme in one library with no third-party dependencies:
 //!
 //! - **[`uuid`]**: UUID v4 (random) and v7 (time-ordered)
 //! - **[`ulid`]**: Universally Unique Lexicographically Sortable ID
@@ -11,18 +11,21 @@
 //! ## Quick example
 //!
 //! ```
+//! # #[cfg(feature = "uuid")] {
 //! use id_forge::uuid::Uuid;
 //!
 //! let id = Uuid::v4();
 //! println!("{id}");
+//! # }
 //! ```
 //!
 //! ## Why this library exists
 //!
 //! Today's options are fragmented: `uuid` for UUIDs, `ulid` for ULIDs,
 //! `snowflake-rs` for snowflakes, `nanoid` for NanoIDs. Each has its
-//! own quirks, MSRV, and dependencies. `id-forge` is one zero-dep
-//! crate at MSRV 1.75 covering every scheme.
+//! own quirks, MSRV, and dependencies. `id-forge` is one crate at
+//! MSRV 1.75 covering every scheme, with no third-party dependencies.
+//! Random IDs come from the operating system's random source.
 //!
 //! ## Stability
 //!

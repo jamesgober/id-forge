@@ -28,9 +28,11 @@
 //!
 //! ## Randomness
 //!
-//! The 80-bit random suffix comes from the shared inline xoshiro256\*\*
-//! generator. It is fast and statistically strong but **not**
-//! cryptographically secure.
+//! The 80-bit random suffix comes from the operating system's random
+//! source, through the same per-thread buffer as `uuid`. A ULID also
+//! carries its creation time, and IDs minted in the same millisecond
+//! on one thread differ by one, so treat a ULID as an identifier, not
+//! a secret.
 
 use core::fmt;
 use std::cell::RefCell;

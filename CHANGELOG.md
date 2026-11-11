@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-11
+
+### Security
+
+- Random IDs now come from the OS random source. `Uuid::v4`,
+  `Uuid::v7`, `Ulid::new` and every `nanoid` generator draw their
+  random bits from the operating system (through the first-party
+  `mod-rand` crate's `tier3`), read in blocks into a per-thread
+  buffer. Previously they came from a seeded, non-cryptographic
+  generator. Upgrade recommended wherever IDs act as tokens or
+  unguessable references.
+
+### Changed
+
+- New runtime dependency: `mod-rand 1.0` (first-party, no
+  dependencies of its own), enabled by the `uuid`, `ulid` and
+  `nanoid` features. `id-forge` still has no third-party runtime
+  dependencies; `docs/STABILITY.md` now states the dependency
+  contract that way.
+- If the OS random source cannot be read, random ID generation
+  panics instead of falling back to a weaker generator (see the
+  panic table in `docs/API.md`). On supported platforms the source
+  blocks rather than fails.
+- `Uuid::v4` keeps its cost (about 20 ns per ID in
+  `examples/bench.rs` on the release profile); `Ulid::new` and
+  `nanoid::generate` cost a few tens of nanoseconds more.
+
+### Compatibility
+
+- No public signature changes. ID formats, the v7 and ULID ordering
+  guarantees, and the NanoID alphabet handling are unchanged.
+- MSRV stays at Rust `1.75`.
+
 ## [1.0.0] - 2026-05-20
 
 ### Stable API
@@ -312,7 +345,8 @@ This is the name-claim release. Real implementations follow RFC 9562
 for UUIDs, the ULID spec, and the Twitter Snowflake design. Production
 randomness lands in `0.9.x`.
 
-[Unreleased]: https://github.com/jamesgober/id-forge/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/jamesgober/id-forge/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/jamesgober/id-forge/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jamesgober/id-forge/releases/tag/v1.0.0
 [0.9.3]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.3
 [0.9.2]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.2

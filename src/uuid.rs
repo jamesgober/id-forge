@@ -17,11 +17,16 @@
 //!
 //! ## Randomness
 //!
-//! The random portion is filled by an inline xoshiro256\*\* generator
-//! seeded from process ID, wall-clock nanoseconds, and a per-process
-//! counter. This is fast and unpredictable across processes, but it is
-//! **not** cryptographically secure — use a CSPRNG for session tokens
-//! or API keys.
+//! The random portion comes from the operating system's random source
+//! (through `mod-rand`'s `tier3`), read in blocks into a per-thread
+//! buffer so most IDs cost no system call. v4 UUIDs are unguessable,
+//! as RFC 9562 expects. v7 UUIDs also carry their creation time.
+//!
+//! If the OS random source cannot be read, generation panics rather
+//! than fall back to a weaker generator. A child process created with
+//! `fork()` (without `exec`) inherits the parent's unread buffer for
+//! the forking thread. In such a child, generate IDs after `exec` or
+//! on a thread the child starts, which gets a fresh buffer.
 
 use core::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};

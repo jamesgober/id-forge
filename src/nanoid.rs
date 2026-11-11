@@ -37,9 +37,10 @@
 //!
 //! ## Randomness quality
 //!
-//! The bit source is the same fast non-cryptographic generator
-//! used by `uuid` and `ulid`. NanoIDs from this crate are suitable
-//! for collision-resistant identifiers, not session tokens.
+//! The bits come from the operating system's random source, through
+//! the same per-thread buffer as `uuid` and `ulid`. A default 21-character
+//! NanoID carries 126 random bits and is suitable for URL tokens and
+//! other unguessable references.
 
 use core::fmt;
 
