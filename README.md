@@ -51,10 +51,30 @@ let id = nanoid::with_length(8);         // shorter NanoID
 | Scheme | Size | Sortable | Distributed-safe | Use case |
 |--------|------|----------|------------------|----------|
 | UUID v4 | 128 bits | No | Yes | Random identifiers, no time component needed |
-| UUID v7 | 128 bits | Yes | Yes | Time-ordered random ID (preferred over v4 for DB primary keys) |
-| ULID | 128 bits | Yes | Yes | Sortable, URL-friendly identifiers |
+| UUID v7 | 128 bits | Yes, across milliseconds | Yes | Time-ordered random ID (preferred over v4 for DB primary keys) |
+| ULID | 128 bits | Yes, strictly per thread | Yes | Sortable, URL-friendly identifiers |
 | Snowflake | 64 bits | Yes | Yes (with worker ID) | Fits in `u64`, time-ordered, suited for high-throughput |
 | NanoID | configurable | No | Yes | URL-safe short IDs, configurable alphabet |
+
+v7 UUIDs minted in the same millisecond sort in random order. ULIDs
+are strictly ordered on one thread, not across threads. For IDs that
+must sort in issue order across threads, share one `Snowflake`
+generator.
+
+## Errors, forks, and secrets
+
+- `Uuid::v4`, `Uuid::v7`, `Ulid::new` and the `nanoid` generators
+  panic if the OS random source fails. `Uuid::try_v4`,
+  `Uuid::try_v7`, `Ulid::try_new`, `nanoid::try_generate`,
+  `nanoid::try_with_length` and `nanoid::try_with_alphabet` return
+  an error instead.
+- A child created with `fork()` does not repeat the parent's random
+  IDs. A restored VM or container snapshot cannot be detected:
+  restore a snapshot once, or start a fresh process after each
+  restore before minting IDs.
+- v4 UUIDs and NanoIDs are hard to guess. When one is a secret,
+  compare it in constant time (for example with `crypt-io`) or store
+  a hash, and keep it out of logs.
 
 ## Feature flags
 

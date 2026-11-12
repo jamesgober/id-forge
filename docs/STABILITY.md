@@ -106,13 +106,24 @@ them:
 * **`Ulid::new` produces ULID-spec-compliant 26-character Crockford
   base32 strings.** 48-bit ms prefix + 80 random bits. The
   **monotonic factory** guarantee: two ULIDs minted in the same
-  millisecond by the same process are strictly byte-wise ordered;
-  the second one is the first one's random suffix `+ 1`.
+  millisecond on the same thread are strictly byte-wise ordered;
+  the second one is the first one's random suffix `+ 1`. Since
+  `1.2.0` this also holds when the wall clock steps back. The
+  factory is per thread: ULIDs minted on different threads are not
+  ordered with each other within a millisecond. (Releases before
+  `1.2.0` stated "per process" here; the behaviour has always been
+  per thread.)
 * **`Snowflake::next_id` is strictly monotonic per worker.** No
   duplicates under multi-thread contention. Sequence exhaustion
   blocks the calling thread in a microsleep loop until the wall
   clock advances. Clock regression causes a `Result::Err(ClockSkew)`
-  from `try_next_id` and a panic from `next_id`.
+  from `try_next_id` and a panic from `next_id`. Since `1.2.0` the
+  same happens when the wall clock reads earlier than the epoch, or
+  does not advance within `MAX_CLOCK_WAIT`; neither method waits
+  without bound.
+* **Fork safety (since `1.2.0`).** A child created with `fork()`
+  does not repeat random IDs that the parent issues. Restored VM or
+  container snapshots are not detected.
 * **`nanoid::custom`, `with_length`, `generate` are bias-free.**
   Power-of-two-mask rejection sampling. Every byte in an alphabet
   has identical probability of being chosen.

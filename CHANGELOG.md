@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-12
+
+### Fixed
+
+- A child process created with `fork()` no longer repeats the
+  parent's random IDs. The per-thread random buffer and the ULID
+  state are discarded in the child before its next ID. Detection
+  uses a `pthread_atfork` handler on Linux, Android, Apple
+  platforms, the BSDs, illumos and Solaris (one atomic load per
+  ID), and a process ID check on other Unix systems.
+- `Snowflake::try_next_id` returns `Err(ClockSkew)` when the wall
+  clock reads earlier than the generator's epoch, instead of issuing
+  4096 IDs with timestamp 0 and then blocking until the clock reaches
+  the epoch. `next_id` panics in that case. The wait for an exhausted
+  millisecond is bounded by the new `MAX_CLOCK_WAIT` (50 ms).
+- ULIDs stay ordered on a thread when the wall clock steps back: the
+  thread keeps its last timestamp and counts up from it.
+- The ULID ordering docs said "per process"; the guarantee is, and
+  has always been, per thread. README, rustdoc, `docs/API.md` and
+  `docs/STABILITY.md` now say so and point at `Snowflake` for
+  ordering across threads.
+- The NanoID module docs no longer describe the old seeded
+  generator.
+
+### Added
+
+- Fallible random generators that return `RandomError` instead of
+  panicking when the OS random source fails: `Uuid::try_v4`,
+  `Uuid::try_v7`, `Ulid::try_new`, `nanoid::try_generate`,
+  `nanoid::try_with_length`.
+- `nanoid::try_with_alphabet` and `nanoid::NanoidError`: a custom
+  alphabet generator that never panics and rejects non-ASCII
+  alphabet bytes.
+- `id_forge::RandomError` and `snowflake::MAX_CLOCK_WAIT`.
+- Docs on fork and snapshot behaviour, the panic conditions of every
+  random generator, and using IDs as secrets.
+
+### Changed
+
+- `Uuid` `Display` (and `to_string`) formats through a lookup table
+  into a stack buffer, several times faster than before.
+
+### Compatibility
+
+- Additive only. No public item was removed or changed signature.
+  MSRV stays at Rust `1.75`.
+
 ## [1.1.0] - 2026-11-11
 
 ### Security
@@ -345,7 +392,8 @@ This is the name-claim release. Real implementations follow RFC 9562
 for UUIDs, the ULID spec, and the Twitter Snowflake design. Production
 randomness lands in `0.9.x`.
 
-[Unreleased]: https://github.com/jamesgober/id-forge/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/jamesgober/id-forge/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/jamesgober/id-forge/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jamesgober/id-forge/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jamesgober/id-forge/releases/tag/v1.0.0
 [0.9.3]: https://github.com/jamesgober/id-forge/releases/tag/v0.9.3
