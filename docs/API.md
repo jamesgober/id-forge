@@ -131,11 +131,34 @@ The feature set is part of the public API per `docs/STABILITY.md`. New flags are
 | `Snowflake::next_id`                | **Panic** on backward clock        | Catch with `try_next_id` instead.     |
 | `nanoid::try_custom`                | `Err(AlphabetError)`               | Pre-validate alphabet at startup.     |
 | `nanoid::custom`                    | Silent (empty/dup-tolerant)        | Use `try_custom` if rejection wanted. |
-| `Uuid::v4`, `Uuid::v7`, `Ulid::new`, every `nanoid` generator | **Panic** if the OS random source fails | None needed on supported platforms: the source blocks rather than fail. Seen only in sandboxes that forbid it. |
+| `Uuid::v4`, `Uuid::v7`, `Ulid::new`, `nanoid::generate`, `with_length`, `custom`, `try_custom` | **Panic** if the OS random source fails | Use the `try_*` form below to get an error instead. |
+| `Uuid::try_v4`, `Uuid::try_v7`, `Ulid::try_new`, `nanoid::try_generate`, `nanoid::try_with_length` | `Err(RandomError)` if the OS random source fails | Return an error response; the next call tries the OS source again. |
+| `nanoid::try_with_alphabet`         | `Err(NanoidError)`: bad alphabet, non-ASCII byte, or OS random failure | Inspect variant. |
 
-`id-forge` **never** issues an ID that could collide with one previously issued by the same generator. When the wall clock cannot guarantee that, `try_next_id` returns `Err` and `next_id` panics — neither falls back to a possibly-duplicate value.
+The OS random source can fail: in a sandbox that forbids it (for example a seccomp filter), or on systems where it is a device file and the process has run out of file descriptors.
 
-Random IDs never fall back to a seeded or weaker generator: if the OS random source cannot be read, generation panics instead.
+A Snowflake generator never issues an ID that could collide with one it issued before. When the wall clock cannot guarantee that (it moved backward, reads earlier than the epoch, or does not advance within `MAX_CLOCK_WAIT`), `try_next_id` returns `Err` and `next_id` panics; neither falls back to a possibly-duplicate value, and neither waits without bound.
+
+Random IDs never fall back to a seeded or weaker generator: if the OS random source cannot be read, the panicking forms panic and the `try_*` forms return `Err`.
+
+### Processes and snapshots
+
+Random bytes are read from the OS in blocks and buffered per thread. A child created with `fork()` discards the buffer and the ULID state it inherited before its next ID, so parent and child never repeat each other's random IDs. On Linux, Android, Apple platforms, the BSDs, illumos and Solaris this is detected through a `pthread_atfork` handler at the cost of one atomic load per ID; on other Unix systems the process ID is checked on every ID.
+
+A restored VM or container snapshot cannot be detected. If a snapshot is restored more than once, every restored copy holds the same buffer and can repeat random IDs (UUID v4 and v7, ULID, NanoID) minted after the restore. Restore a snapshot once, or start a fresh process after each restore before minting IDs.
+
+### Using IDs as secrets
+
+v4 UUIDs and NanoIDs are hard to guess, and are fine as unguessable references. When one is a secret (a reset token, a session key):
+
+- compare a presented value in constant time (for example with the `crypt-io` crate), or store and look up a hash of it; `==` on `Uuid` or `String` stops at the first differing byte;
+- keep it out of logs: `Debug` and `Display` print the full value.
+
+ULIDs and Snowflake IDs carry their creation time and are not secrets.
+
+### `RandomError`
+
+Exported at the crate root (`id_forge::RandomError`) when any of the `uuid`, `ulid` or `nanoid` features is on. The OS random source could not be read. `kind()` and `raw_os_error()` describe the underlying I/O error, which is also its `source()`. Implements `Debug, Display, std::error::Error`.
 
 ---
 
@@ -154,7 +177,8 @@ A 128-bit UUID stored as `[u8; 16]` in big-endian network order, identical to th
 - `Uuid::nil() -> Self` (`const fn`) — all-zeros UUID (RFC 9562 §5.9).
 - `Uuid::max() -> Self` (`const fn`) — all-ones UUID (RFC 9562 §5.10).
 - `Uuid::v4() -> Self` — RFC 9562 §5.4 random UUID. 122 random bits + version `0100` + RFC 4122 variant.
-- `Uuid::v7() -> Self` — RFC 9562 §5.7 time-ordered UUID. 48-bit big-endian millisecond prefix + 74 random bits + version `0111` + RFC 4122 variant.
+- `Uuid::v7() -> Self`: RFC 9562 §5.7 time-ordered UUID. 48-bit big-endian millisecond prefix + 74 random bits + version `0111` + RFC 4122 variant. UUIDs from different milliseconds sort in time order; UUIDs from the same millisecond sort in random order.
+- `Uuid::try_v4() -> Result<Self, RandomError>`, `Uuid::try_v7() -> Result<Self, RandomError>`: the same, returning an error instead of panicking when the OS random source fails. Since `1.2.0`.
 - `Uuid::from_bytes(&[u8; 16]) -> Self` (`const fn`) — wrap an existing big-endian byte representation without modifying version / variant bits.
 
 #### Accessors
@@ -257,7 +281,8 @@ A 128-bit ULID: 48-bit big-endian millisecond timestamp + 80-bit randomness, dis
 
 - `Ulid::nil() -> Self` (`const fn`) — all-zeros.
 - `Ulid::max() -> Self` (`const fn`) — all-ones (`7ZZZZZZZZZZZZZZZZZZZZZZZZZ`).
-- `Ulid::new() -> Self` — current millisecond + 80 fresh random bits, with the per-process monotonic factory guarantee (see below).
+- `Ulid::new() -> Self`: current millisecond + 80 fresh random bits, with the per-thread monotonic factory guarantee (see below).
+- `Ulid::try_new() -> Result<Self, RandomError>`: the same, returning an error instead of panicking when the OS random source fails. Since `1.2.0`.
 - `Ulid::from_bytes(&[u8; 16]) -> Self` (`const fn`) — wrap raw bytes.
 
 #### Accessors
@@ -272,7 +297,9 @@ A 128-bit ULID: 48-bit big-endian millisecond timestamp + 80-bit randomness, dis
 
 #### Monotonic factory
 
-The factory is thread-local and consists of `(last_ms, last_rand)`. When `new()` observes the same millisecond as the previous call on the same thread, it returns `last_rand + 1` instead of fresh randomness. This guarantees `b > a` for every consecutive pair in a process, even when thousands of IDs are minted within a single millisecond.
+The factory is thread-local and consists of `(last_ms, last_rand)`. When `new()` observes the same millisecond as the previous call on the same thread, it returns `last_rand + 1` instead of fresh randomness. If the wall clock reads earlier than `last_ms` (a clock step back), the thread keeps `last_ms` and also returns `last_rand + 1`. This guarantees `b > a` for every consecutive pair minted on one thread, even when thousands of IDs are minted within a single millisecond.
+
+The guarantee is per thread, not per process. Two threads each run their own factory, so in the same millisecond a ULID from one thread can sort before one that another thread minted earlier. When IDs from several threads must sort in issue order, share one `Snowflake` generator, which is monotonic across threads.
 
 #### Example: in-millisecond burst, all strictly ordered
 
@@ -364,7 +391,7 @@ Worker IDs above 1023 are silently clamped to 10 bits (`worker_id & 0x3FF`).
 
 #### Generation
 
-- `Snowflake::try_next_id(&self) -> Result<u64, ClockSkew>` — explicit clock-skew handling. Blocks the calling thread in a 100 µs sleep loop when the millisecond's 4096-ID sequence is exhausted; that block ends as soon as the wall clock advances.
+- `Snowflake::try_next_id(&self) -> Result<u64, ClockSkew>`: explicit clock-skew handling. Returns `Err` when the wall clock moved backward, reads earlier than the epoch, or does not advance within `MAX_CLOCK_WAIT`. Blocks the calling thread in a 100 µs sleep loop when the millisecond's 4096-ID sequence is exhausted; that block ends as soon as the wall clock advances, and never lasts longer than `MAX_CLOCK_WAIT` (50 ms).
 - `Snowflake::next_id(&self) -> u64` — convenience wrapper around `try_next_id`. **Panics** on `Err(ClockSkew)`.
 
 #### Decoding
@@ -445,7 +472,7 @@ pub struct ClockSkew {
 }
 ```
 
-Both fields are offsets from the generator's epoch (not wall-clock ms). `now_ms < last_ms` is what produced the error.
+Both fields are offsets from the generator's epoch (not wall-clock ms). `now_ms < last_ms` means the clock moved backward. `now_ms == last_ms` means the clock did not advance within `MAX_CLOCK_WAIT`. `now_ms == 0` with `last_ms == 0` means the clock reads earlier than the epoch (a clock that has not been set yet, or a future epoch).
 
 Implements `Debug, Clone, Copy, PartialEq, Eq, Display, std::error::Error`.
 
@@ -455,6 +482,7 @@ Implements `Debug, Clone, Copy, PartialEq, Eq, Display, std::error::Error`.
 - `SEQUENCE_BITS: u32 = 12`
 - `WORKER_BITS: u32 = 10`
 - `TIMESTAMP_BITS: u32 = 41`
+- `MAX_CLOCK_WAIT: Duration = 50 ms`: the longest `try_next_id` waits for the wall clock to advance. Since `1.2.0`.
 
 These let downstream code spell the bit layout without hard-coding `12`, `10`, `41`.
 
@@ -478,6 +506,10 @@ NanoID is exposed as free functions on the `nanoid` module. There is no struct �
 - `nanoid::custom(length: usize, alphabet: &[u8]) -> String` — `length` characters over `alphabet`. **Permissive**: empty alphabet returns `""`, duplicate bytes are tolerated (and skew the output distribution toward repeated bytes).
 - `nanoid::try_custom(length: usize, alphabet: &[u8]) -> Result<String, AlphabetError>` — strict counterpart. Validates the alphabet first.
 - `nanoid::validate_alphabet(alphabet: &[u8]) -> Result<(), AlphabetError>` — vet an alphabet without generating anything. Useful for startup-time configuration checks.
+- `nanoid::try_generate() -> Result<String, RandomError>`, `nanoid::try_with_length(length: usize) -> Result<String, RandomError>`: return an error instead of panicking when the OS random source fails. Since `1.2.0`.
+- `nanoid::try_with_alphabet(length: usize, alphabet: &[u8]) -> Result<String, NanoidError>`: never panics: rejects an empty or duplicate alphabet, any non-ASCII byte, and reports an OS random failure as an error. Since `1.2.0`.
+
+Alphabets are byte slices and each byte is one character, so use ASCII alphabets. `custom` and `try_custom` map each byte to the character with the same code point, so a multi-byte UTF-8 alphabet comes out as different text; `try_with_alphabet` rejects it.
 
 #### Bias-free selection
 
@@ -566,6 +598,19 @@ pub enum AlphabetError {
 `Duplicate(b)` — byte `b` appears more than once. The first duplicate found is reported.
 
 Implements `Debug, Clone, Copy, PartialEq, Eq, Display, std::error::Error`.
+
+### `nanoid::NanoidError`
+
+```rust
+#[non_exhaustive]
+pub enum NanoidError {
+    Alphabet(AlphabetError),
+    NonAscii(u8),
+    Random(RandomError),
+}
+```
+
+Returned by `try_with_alphabet`. `Alphabet` is an empty or duplicate alphabet, `NonAscii(b)` is the first byte at or above `0x80`, `Random` is an OS random failure. Implements `Debug, Display, std::error::Error`. Since `1.2.0`.
 
 ### `nanoid` constants
 

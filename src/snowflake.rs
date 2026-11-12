@@ -15,10 +15,13 @@
 //! IDs are strictly monotonic within a single worker. When 4096 IDs
 //! are minted in the same millisecond the generator blocks (microsleep
 //! loop) until the wall clock advances. When the wall clock moves
-//! backward, [`Snowflake::try_next_id`] returns
-//! `Err(`[`ClockSkew`]`)` and [`Snowflake::next_id`] panics — the spec
-//! forbids issuing IDs whose timestamps could collide with previously
-//! issued ones.
+//! backward, or reads earlier than the generator's epoch,
+//! [`Snowflake::try_next_id`] returns `Err(`[`ClockSkew`]`)` and
+//! [`Snowflake::next_id`] panics. The spec forbids issuing IDs whose
+//! timestamps could collide with previously issued ones, and an ID
+//! from before the epoch has no valid timestamp. Neither method waits
+//! without bound: if the wall clock does not advance within
+//! [`MAX_CLOCK_WAIT`], `try_next_id` returns an error.
 //!
 //! ```
 //! use id_forge::snowflake::Snowflake;
@@ -35,7 +38,7 @@
 
 use core::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Default epoch (2026-01-01T00:00:00Z in milliseconds since UNIX epoch).
 pub const DEFAULT_EPOCH_MS: u64 = 1_767_225_600_000;
@@ -50,6 +53,13 @@ pub const TIMESTAMP_BITS: u32 = 41;
 const SEQUENCE_MASK: u64 = (1 << SEQUENCE_BITS) - 1;
 const WORKER_MASK: u64 = (1 << WORKER_BITS) - 1;
 const TIMESTAMP_MASK: u64 = (1 << TIMESTAMP_BITS) - 1;
+
+/// Longest time [`Snowflake::try_next_id`] waits for the wall clock to
+/// move past an exhausted millisecond before it returns an error.
+///
+/// A working clock advances in about one millisecond. Only a clock
+/// that has stopped or jumped back during the wait reaches this bound.
+pub const MAX_CLOCK_WAIT: Duration = Duration::from_millis(50);
 
 const WORKER_SHIFT: u32 = SEQUENCE_BITS;
 const TIMESTAMP_SHIFT: u32 = SEQUENCE_BITS + WORKER_BITS;
@@ -147,12 +157,22 @@ impl Snowflake {
         self.epoch_ms
     }
 
-    /// Generate the next ID, returning `Err` if the wall clock has
-    /// moved backward since the previous call.
+    /// Generate the next ID, returning `Err` if the wall clock cannot
+    /// be used to issue one.
+    ///
+    /// Returns [`ClockSkew`] when:
+    ///
+    /// - the wall clock has moved backward since the previous ID,
+    /// - the wall clock reads earlier than the generator's epoch
+    ///   (`now_ms` is then `0`), for example on a device whose clock
+    ///   has not been set yet, or with a future epoch,
+    /// - the millisecond's 4096 IDs are used up and the wall clock does
+    ///   not advance within [`MAX_CLOCK_WAIT`].
     ///
     /// When 4096 IDs have been issued in the same millisecond, this
     /// method blocks in a microsecond sleep loop until the wall clock
-    /// advances. It does **not** spin on a busy loop.
+    /// advances. It does **not** spin on a busy loop, and it never
+    /// waits longer than [`MAX_CLOCK_WAIT`].
     ///
     /// # Example
     ///
@@ -169,7 +189,9 @@ impl Snowflake {
             let last_ms = cur >> STATE_SEQ_BITS;
             let next_seq = cur & STATE_SEQ_MASK;
 
-            let now = current_offset_ms(self.epoch_ms);
+            let Some(now) = current_offset_ms(self.epoch_ms) else {
+                return Err(ClockSkew { last_ms, now_ms: 0 });
+            };
             if now < last_ms {
                 return Err(ClockSkew {
                     last_ms,
@@ -179,7 +201,7 @@ impl Snowflake {
 
             let (use_ms, assigned, new_next_seq) = if now == last_ms {
                 if next_seq >= STATE_SEQ_EXHAUSTED {
-                    sleep_until_after(self.epoch_ms, last_ms);
+                    wait_until_after(self.epoch_ms, last_ms)?;
                     continue;
                 }
                 (last_ms, next_seq, next_seq + 1)
@@ -202,7 +224,8 @@ impl Snowflake {
     }
 
     /// Generate the next ID. Panics if the wall clock has moved
-    /// backward since the previous call.
+    /// backward since the previous call, or reads earlier than the
+    /// epoch.
     ///
     /// Use [`Snowflake::try_next_id`] when callers need to recover
     /// from clock skew (e.g. to surface it as a service-level error
@@ -210,8 +233,11 @@ impl Snowflake {
     ///
     /// # Panics
     ///
-    /// Panics with a [`ClockSkew`] description if the wall clock has
-    /// regressed below the most recently issued ID's timestamp.
+    /// Panics with a [`ClockSkew`] description in every case where
+    /// [`Snowflake::try_next_id`] returns `Err`: the wall clock has
+    /// regressed below the most recently issued ID's timestamp, reads
+    /// earlier than the epoch, or has not advanced within
+    /// [`MAX_CLOCK_WAIT`].
     ///
     /// # Example
     ///
@@ -258,14 +284,19 @@ impl Snowflake {
 }
 
 /// Error returned by [`Snowflake::try_next_id`] when the system clock
-/// has moved backward since the most recent ID was issued.
+/// cannot be used to issue an ID: it has moved backward since the most
+/// recent ID was issued, it reads earlier than the epoch, or it has not
+/// advanced within [`MAX_CLOCK_WAIT`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClockSkew {
     /// The most recent millisecond offset (since the epoch) at which
     /// the generator successfully issued an ID.
     pub last_ms: u64,
-    /// The current millisecond offset reported by the wall clock,
-    /// which is strictly less than `last_ms`.
+    /// The current millisecond offset reported by the wall clock.
+    ///
+    /// Less than `last_ms` when the clock moved backward, equal to it
+    /// when the clock did not advance within [`MAX_CLOCK_WAIT`], and
+    /// `0` when the clock reads earlier than the epoch.
     pub now_ms: u64,
 }
 
@@ -281,18 +312,38 @@ impl fmt::Display for ClockSkew {
 
 impl std::error::Error for ClockSkew {}
 
-fn current_offset_ms(epoch_ms: u64) -> u64 {
+/// Milliseconds since `epoch_ms`, or `None` when the wall clock reads
+/// earlier than the epoch.
+fn current_offset_ms(epoch_ms: u64) -> Option<u64> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    now.saturating_sub(epoch_ms) & TIMESTAMP_MASK
+    now.checked_sub(epoch_ms).map(|d| d & TIMESTAMP_MASK)
 }
 
-fn sleep_until_after(epoch_ms: u64, last_ms: u64) {
+/// Wait until the wall clock is past `last_ms`, for at most
+/// [`MAX_CLOCK_WAIT`].
+fn wait_until_after(epoch_ms: u64, last_ms: u64) -> Result<(), ClockSkew> {
+    let start = Instant::now();
     loop {
-        if current_offset_ms(epoch_ms) > last_ms {
-            return;
+        match current_offset_ms(epoch_ms) {
+            None => return Err(ClockSkew { last_ms, now_ms: 0 }),
+            Some(now) if now > last_ms => return Ok(()),
+            Some(now) if now < last_ms => {
+                return Err(ClockSkew {
+                    last_ms,
+                    now_ms: now,
+                })
+            }
+            Some(now) => {
+                if start.elapsed() >= MAX_CLOCK_WAIT {
+                    return Err(ClockSkew {
+                        last_ms,
+                        now_ms: now,
+                    });
+                }
+            }
         }
         std::thread::sleep(Duration::from_micros(100));
     }
@@ -373,7 +424,7 @@ mod tests {
     fn sequence_exhaustion_blocks_until_next_ms() {
         // Pre-load state to simulate an exhausted millisecond.
         let gen = Snowflake::new(1);
-        let now = current_offset_ms(gen.epoch_ms);
+        let now = current_offset_ms(gen.epoch_ms).unwrap();
         let exhausted_state = (now << STATE_SEQ_BITS) | STATE_SEQ_EXHAUSTED;
         gen.state.store(exhausted_state, Ordering::Release);
 
@@ -395,7 +446,7 @@ mod tests {
         let gen = Snowflake::new(1);
         // Force the state to claim we've already issued an ID
         // far in the future relative to the wall clock.
-        let future_ms = current_offset_ms(gen.epoch_ms) + 5_000;
+        let future_ms = current_offset_ms(gen.epoch_ms).unwrap() + 5_000;
         gen.state
             .store(future_ms << STATE_SEQ_BITS, Ordering::Release);
 
@@ -412,10 +463,64 @@ mod tests {
     #[should_panic(expected = "clock moved backward")]
     fn next_id_panics_on_clock_skew() {
         let gen = Snowflake::new(1);
-        let future_ms = current_offset_ms(gen.epoch_ms) + 5_000;
+        let future_ms = current_offset_ms(gen.epoch_ms).unwrap() + 5_000;
         gen.state
             .store(future_ms << STATE_SEQ_BITS, Ordering::Release);
         let _ = gen.next_id();
+    }
+
+    fn wall_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    #[test]
+    fn clock_before_epoch_is_an_error_not_a_hang() {
+        // Epoch one hour in the future: the wall clock reads earlier.
+        let gen = Arc::new(Snowflake::with_epoch(1, wall_ms() + 3_600_000));
+        let g = Arc::clone(&gen);
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let mut results = Vec::new();
+            for _ in 0..5_000 {
+                results.push(g.try_next_id());
+            }
+            let _ = tx.send(results);
+        });
+        let results = rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("try_next_id must not block when the clock is before the epoch");
+        for r in results {
+            assert_eq!(
+                r,
+                Err(ClockSkew {
+                    last_ms: 0,
+                    now_ms: 0
+                })
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "clock moved backward")]
+    fn next_id_panics_when_clock_before_epoch() {
+        let gen = Snowflake::with_epoch(1, wall_ms() + 3_600_000);
+        let _ = gen.next_id();
+    }
+
+    #[test]
+    fn stuck_clock_wait_is_bounded() {
+        // The millisecond is exhausted and the "clock" is one hour
+        // ahead of the state, as if it jumped back during the wait:
+        // the wait must end with an error, not loop.
+        let gen = Snowflake::new(1);
+        let ahead = current_offset_ms(gen.epoch_ms).unwrap() + 3_600_000;
+        let start = Instant::now();
+        let res = wait_until_after(gen.epoch_ms, ahead);
+        assert!(matches!(res, Err(ClockSkew { last_ms, .. }) if last_ms == ahead));
+        assert!(start.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

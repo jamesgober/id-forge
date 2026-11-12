@@ -13,18 +13,29 @@
 //! let a = Ulid::new();
 //! let b = Ulid::new();
 //! assert_eq!(a.to_string().len(), 26);
-//! assert!(b > a);                                  // monotonic per process
+//! assert!(b > a);                                  // monotonic per thread
 //! let parsed = Ulid::parse_str(&a.to_string()).unwrap();
 //! assert_eq!(a, parsed);
 //! ```
 //!
 //! ## Monotonicity
 //!
-//! Within a single process, two ULIDs generated in the same
-//! millisecond are guaranteed to be byte-wise ordered: the second one
-//! is the first one's 80-bit random suffix plus one. Across
-//! milliseconds, fresh randomness is drawn. This matches the
-//! "monotonic factory" guarantee in the spec.
+//! On one thread, every ULID is strictly greater than the one before
+//! it. Two ULIDs generated in the same millisecond on the same thread
+//! are byte-wise ordered: the second one is the first one's 80-bit
+//! random suffix plus one. If the wall clock steps back (an NTP
+//! correction, a VM migration), the thread keeps the last timestamp it
+//! used and keeps counting up from it, so ordering still holds. Across
+//! milliseconds, fresh randomness is drawn. This is the spec's
+//! "monotonic factory", with one factory per thread.
+//!
+//! The guarantee does not extend across threads. Two threads that
+//! mint ULIDs in the same millisecond each start from their own random
+//! suffix, so a ULID from one thread can sort before a ULID that
+//! another thread minted earlier. When IDs from several threads must
+//! sort in issue order, share one Snowflake generator
+//! (`id_forge::snowflake::Snowflake`), which is monotonic across
+//! threads.
 //!
 //! ## Randomness
 //!
@@ -33,12 +44,27 @@
 //! carries its creation time, and IDs minted in the same millisecond
 //! on one thread differ by one, so treat a ULID as an identifier, not
 //! a secret.
+//!
+//! ## Processes and snapshots
+//!
+//! A child created with `fork()` does not reuse the parent's random
+//! buffer or its monotonic state: both are reset in the child before
+//! its next ULID. A restored VM or container snapshot cannot be
+//! detected, so a snapshot that is restored more than once can repeat
+//! ULIDs (and every other random ID) minted after the restore. Restore
+//! a snapshot once, or start a fresh process after each restore before
+//! minting IDs.
+//!
+//! ## Errors
+//!
+//! [`Ulid::new`] panics if the OS random source fails.
+//! [`Ulid::try_new`] returns a [`RandomError`] instead.
 
 use core::fmt;
 use std::cell::RefCell;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::rng;
+use crate::rng::{self, RandomError};
 
 /// Crockford base32 alphabet — the 32 characters ULID display uses.
 const ALPHABET: &[u8; 32] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
@@ -92,10 +118,16 @@ impl Ulid {
 
     /// Construct a new ULID at the current wall-clock millisecond.
     ///
-    /// Two ULIDs minted in the same millisecond by the same process
-    /// are strictly ordered: the second one is the first one's random
-    /// suffix plus one. Across milliseconds, the randomness is freshly
-    /// drawn.
+    /// Two ULIDs minted on the same thread are strictly ordered: in the
+    /// same millisecond the second one is the first one's random suffix
+    /// plus one. Across milliseconds, the randomness is freshly drawn.
+    /// Ordering is per thread, not per process; see the
+    /// [module docs](self#monotonicity).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS random source fails. Use [`Ulid::try_new`] to
+    /// get an error instead.
     ///
     /// # Example
     ///
@@ -107,6 +139,27 @@ impl Ulid {
     /// assert!(b > a);
     /// ```
     pub fn new() -> Self {
+        match Self::try_new() {
+            Ok(id) => id,
+            Err(e) => rng::fail(e),
+        }
+    }
+
+    /// Fallible form of [`Ulid::new`].
+    ///
+    /// Returns [`RandomError`] instead of panicking when the OS random
+    /// source fails. The ordering guarantee is the same as
+    /// [`Ulid::new`], and both share one per-thread state.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::ulid::Ulid;
+    ///
+    /// let id = Ulid::try_new().expect("OS random source");
+    /// assert_eq!(id.to_string().len(), 26);
+    /// ```
+    pub fn try_new() -> Result<Self, RandomError> {
         let ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -114,8 +167,8 @@ impl Ulid {
             & ((1u64 << 48) - 1);
         STATE.with(|cell| {
             let mut st = cell.borrow_mut();
-            let rand = st.next_random(ms);
-            Self::pack(ms, rand)
+            let (ms, rand) = st.next(ms, rng::fork_token())?;
+            Ok(Self::pack(ms, rand))
         })
     }
 
@@ -283,18 +336,37 @@ const fn decode_char(c: u8) -> Option<u8> {
 // -------- Monotonic factory state --------
 
 thread_local! {
-    static STATE: RefCell<MonotonicState> = RefCell::new(MonotonicState::default());
+    static STATE: RefCell<MonotonicState> = const { RefCell::new(MonotonicState::new()) };
 }
 
-#[derive(Default)]
 struct MonotonicState {
     last_ms: u64,
     last_rand: u128,
+    fork_token: u64,
 }
 
 impl MonotonicState {
-    fn next_random(&mut self, ms: u64) -> u128 {
-        if ms == self.last_ms && self.last_rand != 0 {
+    const fn new() -> Self {
+        Self {
+            last_ms: 0,
+            last_rand: 0,
+            fork_token: 0,
+        }
+    }
+
+    /// Return the `(ms, random suffix)` pair for the next ULID.
+    ///
+    /// `ms` is the wall clock. The returned timestamp is never below
+    /// the last one, so a clock step back keeps the sequence ordered.
+    fn next(&mut self, ms: u64, fork_token: u64) -> Result<(u64, u128), RandomError> {
+        if fork_token != self.fork_token {
+            // Copied from the parent by `fork()`: the parent may issue
+            // `last_rand + 1` too, so start over with fresh randomness.
+            self.last_ms = 0;
+            self.last_rand = 0;
+            self.fork_token = fork_token;
+        }
+        if ms <= self.last_ms && self.last_rand != 0 {
             let next = self.last_rand.wrapping_add(1) & RAND_MASK_80;
             assert!(
                 next != 0,
@@ -302,13 +374,13 @@ impl MonotonicState {
             );
             self.last_rand = next;
         } else {
+            let hi = rng::try_next_u64()? as u128;
+            let lo = rng::try_next_u64()? as u128;
             self.last_ms = ms;
-            let hi = rng::next_u64() as u128;
-            let lo = rng::next_u64() as u128;
             // 80 random bits: 64 from `hi`, top 16 from `lo`.
             self.last_rand = ((hi & 0xFFFF_FFFF_FFFF_FFFF) << 16) | ((lo >> 48) & 0xFFFF);
         }
-        self.last_rand
+        Ok((self.last_ms, self.last_rand))
     }
 }
 
@@ -466,6 +538,60 @@ mod tests {
         for _ in 0..10_000 {
             assert!(set.insert(Ulid::new()));
         }
+    }
+
+    #[test]
+    fn clock_step_back_keeps_order() {
+        let mut st = MonotonicState::new();
+        let token = rng::fork_token();
+        let (ms_a, rand_a) = st.next(1_000_000, token).unwrap();
+        // The wall clock steps back 5 ms.
+        let (ms_b, rand_b) = st.next(999_995, token).unwrap();
+        let a = Ulid::pack(ms_a, rand_a);
+        let b = Ulid::pack(ms_b, rand_b);
+        assert!(
+            b > a,
+            "a ULID minted after a clock step back must sort after earlier ones"
+        );
+        assert_eq!(ms_b, ms_a);
+        // The clock moves forward again: fresh randomness, later time.
+        let (ms_c, _) = st.next(1_000_001, token).unwrap();
+        assert_eq!(ms_c, 1_000_001);
+    }
+
+    #[test]
+    fn changed_fork_token_resets_state() {
+        let token = rng::fork_token();
+        let mut st = MonotonicState::new();
+        let (ms, rand) = st.next(1_000_000, token).unwrap();
+        // A forked child holds a copy of this state, under a token
+        // that no longer matches. It must not continue the counter.
+        let mut child = MonotonicState {
+            last_ms: ms,
+            last_rand: rand,
+            fork_token: token.wrapping_add(1),
+        };
+        let (_, child_next) = child.next(ms, token).unwrap();
+        assert_ne!(
+            child_next,
+            rand + 1,
+            "a forked child must draw a fresh suffix"
+        );
+        // The parent continues its own counter.
+        let (_, parent_next) = st.next(ms, token).unwrap();
+        assert_eq!(parent_next, rand + 1);
+    }
+
+    #[test]
+    fn try_new_reports_random_failure() {
+        // A new millisecond needs fresh randomness; force the refill
+        // to fail and check that the error surfaces.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        rng::test_hooks::set_fail(true);
+        let res = Ulid::try_new();
+        rng::test_hooks::set_fail(false);
+        assert!(res.is_err());
+        assert!(Ulid::try_new().is_ok());
     }
 
     #[test]

@@ -27,6 +27,34 @@
 //! MSRV 1.75 covering every scheme, with no third-party dependencies.
 //! Random IDs come from the operating system's random source.
 //!
+//! ## Errors and panics
+//!
+//! The random generators ([`uuid::Uuid::v4`], [`uuid::Uuid::v7`],
+//! [`ulid::Ulid::new`], and the `nanoid` functions) panic if the OS
+//! random source cannot be read; they never fall back to a weaker
+//! generator. Each has a `try_*` form that returns a [`RandomError`]
+//! instead, for services that must turn the failure into an error
+//! response.
+//!
+//! ## Processes and snapshots
+//!
+//! Random bytes are read from the OS in blocks and buffered per
+//! thread. A child created with `fork()` discards the buffer and the
+//! ULID state it inherited before its next ID, so parent and child do
+//! not repeat each other. A restored VM or container snapshot cannot
+//! be detected: a snapshot restored more than once can repeat random
+//! IDs minted after the restore. Restore a snapshot once, or start a
+//! fresh process after each restore before minting IDs.
+//!
+//! ## Using IDs as secrets
+//!
+//! v4 UUIDs and NanoIDs are hard to guess. When one is used as a
+//! secret (a reset token, a session key), compare a presented value in
+//! constant time (for example with the `crypt-io` crate) or store and
+//! look up a hash of it, and keep it out of logs: `==` stops at the
+//! first differing byte, and `Debug` and `Display` print the full
+//! value. ULIDs and Snowflake IDs are not secrets.
+//!
 //! ## Stability
 //!
 //! `v1.0.0` is the API freeze. Every public item visible from this
@@ -42,6 +70,13 @@
 
 #[cfg(any(feature = "uuid", feature = "ulid", feature = "nanoid"))]
 mod rng;
+
+#[cfg(any(feature = "uuid", feature = "ulid", feature = "nanoid"))]
+#[cfg_attr(
+    docsrs,
+    doc(cfg(any(feature = "uuid", feature = "ulid", feature = "nanoid")))
+)]
+pub use rng::RandomError;
 
 #[cfg(feature = "uuid")]
 pub mod uuid;

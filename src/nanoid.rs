@@ -23,17 +23,20 @@
 //!
 //! ## Bias-free selection
 //!
-//! NanoID picks each character by drawing bits from the shared
-//! xoshiro256\*\* generator, masking to the smallest power of two
-//! that covers the alphabet, and rejecting indices that fall above
-//! the alphabet's size. For a 64-character alphabet the acceptance
-//! rate is 100 %; for a 17-character alphabet it's 17/32 = 53 %.
-//! Either way, every character of the alphabet has identical
-//! probability of being chosen.
+//! Each character is picked from OS random bits by mask and reject:
+//! the bits are masked to the smallest power of two that covers the
+//! alphabet, and indices at or above the alphabet's size are thrown
+//! away. For a 64-character alphabet every draw is used; for a
+//! 17-character alphabet 17 of 32 are. Either way, every character of
+//! the alphabet is equally likely.
 //!
-//! The 0.1.0 placeholder used a linear congruential generator with
-//! `byte % alphabet.len()`, which biased the result whenever the
-//! alphabet size was not a power of two. 0.9.3 fixes that.
+//! ## Alphabets
+//!
+//! An alphabet is a byte slice and every byte is one character, so use
+//! ASCII alphabets. [`custom`] and [`try_custom`] map each byte to the
+//! character with the same code point, which turns a multi-byte UTF-8
+//! alphabet into different text. [`try_with_alphabet`] rejects any
+//! byte that is not ASCII.
 //!
 //! ## Randomness quality
 //!
@@ -41,10 +44,32 @@
 //! the same per-thread buffer as `uuid` and `ulid`. A default 21-character
 //! NanoID carries 126 random bits and is suitable for URL tokens and
 //! other unguessable references.
+//!
+//! When a NanoID is used as a secret (a reset token, a session key),
+//! compare a presented value in constant time (for example with the
+//! `crypt-io` crate) or store and look up a hash of it, because `==`
+//! on a `String` stops at the first differing byte. Keep secret IDs
+//! out of logs.
+//!
+//! ## Processes and snapshots
+//!
+//! A child created with `fork()` does not reuse the parent's random
+//! buffer: the buffer is discarded in the child before its next ID. A
+//! restored VM or container snapshot cannot be detected, so a snapshot
+//! that is restored more than once can repeat IDs minted after the
+//! restore. Restore a snapshot once, or start a fresh process after
+//! each restore before minting IDs.
+//!
+//! ## Errors
+//!
+//! [`generate`], [`with_length`], [`custom`] and [`try_custom`] panic
+//! if the OS random source fails. [`try_generate`],
+//! [`try_with_length`] and [`try_with_alphabet`] return an error
+//! instead.
 
 use core::fmt;
 
-use crate::rng;
+use crate::rng::{self, RandomError};
 
 /// Default alphabet: URL-safe, 64 characters (`_-` + alphanumeric).
 pub const DEFAULT_ALPHABET: &[u8] =
@@ -54,6 +79,11 @@ pub const DEFAULT_ALPHABET: &[u8] =
 pub const DEFAULT_LENGTH: usize = 21;
 
 /// Generate a NanoID using the default alphabet and length.
+///
+/// # Panics
+///
+/// Panics if the OS random source fails. Use [`try_generate`] to get
+/// an error instead.
 ///
 /// # Example
 ///
@@ -67,7 +97,29 @@ pub fn generate() -> String {
     custom(DEFAULT_LENGTH, DEFAULT_ALPHABET)
 }
 
+/// Fallible form of [`generate`].
+///
+/// Returns [`RandomError`] instead of panicking when the OS random
+/// source fails.
+///
+/// # Example
+///
+/// ```
+/// use id_forge::nanoid;
+///
+/// let id = nanoid::try_generate().expect("OS random source");
+/// assert_eq!(id.len(), 21);
+/// ```
+pub fn try_generate() -> Result<String, RandomError> {
+    try_custom_unchecked(DEFAULT_LENGTH, DEFAULT_ALPHABET)
+}
+
 /// Generate a NanoID of the given length using the default alphabet.
+///
+/// # Panics
+///
+/// Panics if the OS random source fails. Use [`try_with_length`] to
+/// get an error instead.
 ///
 /// # Example
 ///
@@ -81,6 +133,65 @@ pub fn with_length(length: usize) -> String {
     custom(length, DEFAULT_ALPHABET)
 }
 
+/// Fallible form of [`with_length`].
+///
+/// Returns [`RandomError`] instead of panicking when the OS random
+/// source fails.
+///
+/// # Example
+///
+/// ```
+/// use id_forge::nanoid;
+///
+/// let id = nanoid::try_with_length(10).expect("OS random source");
+/// assert_eq!(id.len(), 10);
+/// ```
+pub fn try_with_length(length: usize) -> Result<String, RandomError> {
+    if length == 0 {
+        return Ok(String::new());
+    }
+    try_custom_unchecked(length, DEFAULT_ALPHABET)
+}
+
+/// Generate a NanoID with a custom alphabet, checking everything.
+///
+/// The fallible counterpart to [`custom`] and [`try_custom`]. It
+/// returns an error, and never panics, when:
+///
+/// - the alphabet is empty or has a duplicate byte
+///   ([`NanoidError::Alphabet`]),
+/// - the alphabet has a byte that is not ASCII
+///   ([`NanoidError::NonAscii`]),
+/// - the OS random source fails ([`NanoidError::Random`]).
+///
+/// # Example
+///
+/// ```
+/// use id_forge::nanoid::{self, AlphabetError, NanoidError};
+///
+/// let id = nanoid::try_with_alphabet(12, b"0123456789abcdef").unwrap();
+/// assert_eq!(id.len(), 12);
+///
+/// assert!(matches!(
+///     nanoid::try_with_alphabet(8, b"aab"),
+///     Err(NanoidError::Alphabet(AlphabetError::Duplicate(b'a')))
+/// ));
+/// assert!(matches!(
+///     nanoid::try_with_alphabet(8, "\u{e9}a".as_bytes()),
+///     Err(NanoidError::NonAscii(0xc3))
+/// ));
+/// ```
+pub fn try_with_alphabet(length: usize, alphabet: &[u8]) -> Result<String, NanoidError> {
+    validate_alphabet(alphabet).map_err(NanoidError::Alphabet)?;
+    if let Some(&b) = alphabet.iter().find(|b| !b.is_ascii()) {
+        return Err(NanoidError::NonAscii(b));
+    }
+    if length == 0 {
+        return Ok(String::new());
+    }
+    try_custom_unchecked(length, alphabet).map_err(NanoidError::Random)
+}
+
 /// Generate a NanoID with a custom length and alphabet.
 ///
 /// This entry point is permissive: an empty alphabet returns the
@@ -88,6 +199,15 @@ pub fn with_length(length: usize) -> String {
 /// (the repeated characters appear with higher probability). Use
 /// [`try_custom`] when you want validation to surface those cases as
 /// an error.
+///
+/// Use an ASCII alphabet: each byte becomes one character, so the
+/// bytes of a multi-byte UTF-8 character come out as other
+/// characters. [`try_with_alphabet`] rejects non-ASCII bytes.
+///
+/// # Panics
+///
+/// Panics if the OS random source fails. Use [`try_with_alphabet`] to
+/// get an error instead.
 ///
 /// # Example
 ///
@@ -110,6 +230,14 @@ pub fn custom(length: usize, alphabet: &[u8]) -> String {
 /// Returns an error when the alphabet is empty or contains a
 /// duplicate byte. A duplicate would otherwise silently skew the
 /// character distribution.
+///
+/// Use an ASCII alphabet: each byte becomes one character.
+/// [`try_with_alphabet`] also rejects non-ASCII bytes.
+///
+/// # Panics
+///
+/// Panics if the OS random source fails. Use [`try_with_alphabet`] to
+/// get an error instead.
 ///
 /// # Example
 ///
@@ -188,13 +316,54 @@ impl fmt::Display for AlphabetError {
 
 impl std::error::Error for AlphabetError {}
 
+/// Error returned by [`try_with_alphabet`].
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum NanoidError {
+    /// The alphabet is empty or has a duplicate byte.
+    Alphabet(AlphabetError),
+    /// The alphabet has this byte, which is not ASCII.
+    NonAscii(u8),
+    /// The OS random source failed.
+    Random(RandomError),
+}
+
+impl fmt::Display for NanoidError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Alphabet(e) => fmt::Display::fmt(e, f),
+            Self::NonAscii(b) => {
+                write!(f, "nanoid: alphabet byte 0x{b:02x} is not ASCII")
+            }
+            Self::Random(e) => fmt::Display::fmt(e, f),
+        }
+    }
+}
+
+impl std::error::Error for NanoidError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Alphabet(e) => Some(e),
+            Self::NonAscii(_) => None,
+            Self::Random(e) => Some(e),
+        }
+    }
+}
+
 fn custom_unchecked(length: usize, alphabet: &[u8]) -> String {
+    match try_custom_unchecked(length, alphabet) {
+        Ok(id) => id,
+        Err(e) => rng::fail(e),
+    }
+}
+
+fn try_custom_unchecked(length: usize, alphabet: &[u8]) -> Result<String, RandomError> {
     let n = alphabet.len();
     if n == 1 {
         // Degenerate: every character is the same.
-        return core::iter::repeat(alphabet[0] as char)
+        return Ok(core::iter::repeat(alphabet[0] as char)
             .take(length)
-            .collect();
+            .collect());
     }
     let bits = mask_bits(n);
     let mask: u64 = (1u64 << bits) - 1;
@@ -206,7 +375,7 @@ fn custom_unchecked(length: usize, alphabet: &[u8]) -> String {
 
     while placed < length {
         if buffer_bits < bits {
-            buffer = rng::next_u64();
+            buffer = rng::try_next_u64()?;
             buffer_bits = 64;
         }
         let idx = (buffer & mask) as usize;
@@ -217,7 +386,7 @@ fn custom_unchecked(length: usize, alphabet: &[u8]) -> String {
             placed += 1;
         }
     }
-    out
+    Ok(out)
 }
 
 /// Bits needed to address any index in `0..n` — the smallest `k`
@@ -360,6 +529,36 @@ mod tests {
         let printable: Vec<u8> = (0..=255).collect();
         let id = custom(30, &printable);
         assert_eq!(id.chars().count(), 30);
+    }
+
+    #[test]
+    fn try_with_alphabet_rejects_non_ascii() {
+        assert!(matches!(
+            try_with_alphabet(16, "\u{e9}".as_bytes()),
+            Err(NanoidError::NonAscii(0xc3))
+        ));
+        assert!(matches!(
+            try_with_alphabet(16, "\u{65e5}\u{672c}".as_bytes()),
+            Err(NanoidError::Alphabet(AlphabetError::Duplicate(_))) | Err(NanoidError::NonAscii(_))
+        ));
+        let id = try_with_alphabet(16, b"abc").unwrap();
+        assert_eq!(id.len(), 16);
+        assert!(id.bytes().all(|b| b"abc".contains(&b)));
+        assert_eq!(try_with_alphabet(0, b"abc").unwrap(), "");
+    }
+
+    #[test]
+    fn try_variants_report_random_failure() {
+        rng::test_hooks::set_fail(true);
+        let a = try_generate();
+        let b = try_with_length(30);
+        let c = try_with_alphabet(30, b"0123456789");
+        rng::test_hooks::set_fail(false);
+        assert!(a.is_err());
+        assert!(b.is_err());
+        assert!(matches!(c, Err(NanoidError::Random(_))));
+        assert_eq!(try_generate().unwrap().len(), DEFAULT_LENGTH);
+        assert_eq!(try_with_length(30).unwrap().len(), 30);
     }
 
     #[test]

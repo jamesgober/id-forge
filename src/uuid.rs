@@ -22,16 +22,41 @@
 //! buffer so most IDs cost no system call. v4 UUIDs are unguessable,
 //! as RFC 9562 expects. v7 UUIDs also carry their creation time.
 //!
-//! If the OS random source cannot be read, generation panics rather
-//! than fall back to a weaker generator. A child process created with
-//! `fork()` (without `exec`) inherits the parent's unread buffer for
-//! the forking thread. In such a child, generate IDs after `exec` or
-//! on a thread the child starts, which gets a fresh buffer.
+//! v7 UUIDs from different milliseconds sort in time order. UUIDs
+//! minted in the same millisecond sort in random order, because v7
+//! has no counter field. Use a ULID (ordered per thread) or a
+//! shared Snowflake generator (ordered across threads) when IDs
+//! minted in the same millisecond must sort in issue order.
+//!
+//! ## Errors
+//!
+//! [`Uuid::v4`] and [`Uuid::v7`] panic if the OS random source cannot
+//! be read; they never fall back to a weaker generator.
+//! [`Uuid::try_v4`] and [`Uuid::try_v7`] return a
+//! [`RandomError`] instead.
+//!
+//! ## Processes and snapshots
+//!
+//! A child created with `fork()` does not reuse the parent's random
+//! buffer: the buffer is discarded in the child before its next ID, so
+//! parent and child never hand out the same random bytes. A restored
+//! VM or container snapshot cannot be detected, so a snapshot that is
+//! restored more than once can repeat IDs minted after the restore.
+//! Restore a snapshot once, or start a fresh process after each
+//! restore before minting IDs.
+//!
+//! ## Using IDs as secrets
+//!
+//! A v4 UUID is hard to guess, but treat it as a secret only with
+//! care. `==` on [`Uuid`] stops at the first differing byte, so
+//! compare a presented secret in constant time (for example with the
+//! `crypt-io` crate), or store and look up a hash of it. `Debug` and
+//! `Display` print the full value, so keep secret IDs out of logs.
 
 use core::fmt;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::rng;
+use crate::rng::{self, RandomError};
 
 /// A 128-bit UUID.
 ///
@@ -80,6 +105,11 @@ impl Uuid {
     /// 122 random bits with the version nibble set to `0100` and the
     /// variant bits set to `10` (RFC 4122 layout).
     ///
+    /// # Panics
+    ///
+    /// Panics if the OS random source fails. Use [`Uuid::try_v4`] to
+    /// get an error instead.
+    ///
     /// # Example
     ///
     /// ```
@@ -89,10 +119,30 @@ impl Uuid {
     /// assert_eq!(id.version(), 4);
     /// ```
     pub fn v4() -> Self {
-        let mut bytes = rng::next_bytes_16();
+        match Self::try_v4() {
+            Ok(id) => id,
+            Err(e) => rng::fail(e),
+        }
+    }
+
+    /// Fallible form of [`Uuid::v4`].
+    ///
+    /// Returns [`RandomError`] instead of panicking when the OS random
+    /// source fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::uuid::Uuid;
+    ///
+    /// let id = Uuid::try_v4().expect("OS random source");
+    /// assert_eq!(id.version(), 4);
+    /// ```
+    pub fn try_v4() -> Result<Self, RandomError> {
+        let mut bytes = rng::try_next_bytes_16()?;
         bytes[6] = (bytes[6] & 0x0f) | 0x40;
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        Self(bytes)
+        Ok(Self(bytes))
     }
 
     /// Construct a v7 (time-ordered) UUID per RFC 9562 §5.7.
@@ -100,7 +150,13 @@ impl Uuid {
     /// 48-bit big-endian millisecond timestamp prefix, 74 random bits,
     /// with the version nibble set to `0111` and the RFC 4122 variant bits.
     /// Two v7 IDs generated in different milliseconds compare in
-    /// timestamp order byte-wise.
+    /// timestamp order byte-wise. IDs from the same millisecond are in
+    /// random order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS random source fails. Use [`Uuid::try_v7`] to
+    /// get an error instead.
     ///
     /// # Example
     ///
@@ -111,16 +167,36 @@ impl Uuid {
     /// assert_eq!(id.version(), 7);
     /// ```
     pub fn v7() -> Self {
+        match Self::try_v7() {
+            Ok(id) => id,
+            Err(e) => rng::fail(e),
+        }
+    }
+
+    /// Fallible form of [`Uuid::v7`].
+    ///
+    /// Returns [`RandomError`] instead of panicking when the OS random
+    /// source fails.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use id_forge::uuid::Uuid;
+    ///
+    /// let id = Uuid::try_v7().expect("OS random source");
+    /// assert_eq!(id.version(), 7);
+    /// ```
+    pub fn try_v7() -> Result<Self, RandomError> {
         let ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
-        let mut bytes = rng::next_bytes_16();
+        let mut bytes = rng::try_next_bytes_16()?;
         let ms_bytes = ms.to_be_bytes();
         bytes[0..6].copy_from_slice(&ms_bytes[2..8]);
         bytes[6] = (bytes[6] & 0x0f) | 0x70;
         bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        Self(bytes)
+        Ok(Self(bytes))
     }
 
     /// Wrap a 16-byte big-endian representation.
@@ -225,13 +301,20 @@ impl Default for Uuid {
 
 impl fmt::Display for Uuid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let b = &self.0;
-        write!(
-            f,
-            "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-        )
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut out = [0u8; 36];
+        let mut o = 0;
+        for (i, &byte) in self.0.iter().enumerate() {
+            if matches!(i, 4 | 6 | 8 | 10) {
+                out[o] = b'-';
+                o += 1;
+            }
+            out[o] = HEX[(byte >> 4) as usize];
+            out[o + 1] = HEX[(byte & 0x0f) as usize];
+            o += 2;
+        }
+        // Every byte written above is ASCII.
+        f.write_str(core::str::from_utf8(&out).unwrap_or(""))
     }
 }
 
@@ -408,6 +491,46 @@ mod tests {
     fn from_str_works() {
         let id: Uuid = "f47ac10b-58cc-4372-a567-0e02b2c3d479".parse().unwrap();
         assert_eq!(id.to_string(), "f47ac10b-58cc-4372-a567-0e02b2c3d479");
+    }
+
+    #[test]
+    fn display_matches_reference_formatting() {
+        fn reference(b: &[u8; 16]) -> String {
+            format!(
+                "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+                b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
+            )
+        }
+        for _ in 0..1000 {
+            let id = Uuid::v4();
+            assert_eq!(id.to_string(), reference(id.as_bytes()));
+        }
+        let mut seq = [0u8; 16];
+        for (i, b) in seq.iter_mut().enumerate() {
+            *b = (i as u8) * 17;
+        }
+        let id = Uuid::from_bytes(&seq);
+        assert_eq!(id.to_string(), reference(&seq));
+    }
+
+    #[test]
+    fn try_v4_and_try_v7_report_random_failure() {
+        rng::test_hooks::set_fail(true);
+        let a = Uuid::try_v4();
+        let b = Uuid::try_v7();
+        rng::test_hooks::set_fail(false);
+        assert!(a.is_err());
+        assert!(b.is_err());
+        assert_eq!(Uuid::try_v4().unwrap().version(), 4);
+        assert_eq!(Uuid::try_v7().unwrap().version(), 7);
+    }
+
+    #[test]
+    #[should_panic(expected = "OS random source failed")]
+    fn v4_panics_on_random_failure() {
+        rng::test_hooks::set_fail(true);
+        let _ = Uuid::v4();
     }
 
     #[test]

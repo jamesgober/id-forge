@@ -39,6 +39,11 @@ fn main() {
     bench("Uuid::v7", iters, Uuid::v7);
     bench("Ulid::new", iters, Ulid::new);
 
+    let uuid = Uuid::v4();
+    bench("Uuid::to_string", iters, || uuid.to_string());
+    let ulid = Ulid::new();
+    bench("Ulid::to_string", iters, || ulid.to_string());
+
     let sf = Snowflake::new(1);
     bench("Snowflake::next_id", iters, || sf.next_id());
 
